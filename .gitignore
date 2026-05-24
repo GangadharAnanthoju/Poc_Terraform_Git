@@ -1,0 +1,24 @@
+# Local .terraform directory (providers, modules)
+.terraform/
+
+# Terraform state files — never commit these
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Sensitive variable files — keep out of source control
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Lock file is safe to commit — keep it
+# .terraform.lock.hcl
+
+# CLI config
+.terraformrc
+terraform.rc
