@@ -16,11 +16,9 @@ GitHub Actions (ubuntu-latest)
     │
     │  OIDC token (JWT) issued per run
     ▼
-Azure AD (Entra ID)
-    │
-    │  Validates token against federated credential
-    ▼
 User-Assigned Managed Identity (UAMI)
+    │  federated credential validates: issuer + subject + audience
+    │  (token validation handled automatically by Azure)
     │
     │  RBAC roles grant access
     ▼
