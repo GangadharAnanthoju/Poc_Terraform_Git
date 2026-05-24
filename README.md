@@ -1,6 +1,25 @@
-# Terraform Learning Guide (Azure Focus)
+# Terraform POC — Azure with GitHub Actions CI/CD
 
-Based on the files in this lab. Every example comes directly from your code.
+Terraform on Azure, deployed via GitHub Actions using **UAMI OIDC federated credentials** — no secrets, no App Registration, no client certificates.
+
+---
+
+## Architecture
+
+![CI/CD Architecture](images/Architecture.jpg)
+
+---
+
+## CI/CD Pipeline
+
+| Branch | Trigger | Pipeline | Deploy target |
+|---|---|---|---|
+| `feature/*` | push / PR into `dev` | terraform-nonprod.yml | DEV (with approval) |
+| `dev` | push | terraform-nonprod.yml | DEV (with approval) |
+| `prod` | merge from `dev` | terraform-prod.yml | PROD (with approval) |
+
+Authentication: GitHub Actions → Azure via **UAMI OIDC** (no client secret).
+Full setup guide: [docs/github-actions-setup.md](docs/github-actions-setup.md)
 
 ---
 
