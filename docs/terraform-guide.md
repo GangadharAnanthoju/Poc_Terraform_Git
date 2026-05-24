@@ -14,7 +14,10 @@ Based on the files in this repo. Every example comes directly from the code.
 6. [Loops — count, for_each, conditional](#6-loops--count-for_each-conditional)
 7. [Modules](#7-modules)
 8. [Outputs](#8-outputs)
-9. [Quick Command Reference](#9-quick-command-reference)
+9. [Provider & Version Constraints](#9-provider--version-constraints)
+10. [Remote State & Backend](#10-remote-state--backend)
+11. [Implicit Dependencies](#11-implicit-dependencies)
+12. [Quick Command Reference](#12-quick-command-reference)
 
 ---
 
@@ -31,7 +34,7 @@ variable "application_name" {
 ```
 Value in `terraform.tfvars`:
 ```hcl
-application_name = "first"
+application_name = "terraform-poc"
 ```
 
 ---
@@ -195,12 +198,21 @@ Priority (lowest → highest)
 ──────────────────────────────────────────────────────────────
 ```
 
+### Files in this repo
+
+```
+├── terraform.tfvars        # auto-loaded — sets application_name, primary_location
+├── env/
+│   ├── dev.tfvars          # NOT auto-loaded — pass with -var-file
+│   └── prod.tfvars         # NOT auto-loaded — pass with -var-file
+```
+
 ### How to use per-environment files
 
 ```powershell
 terraform plan -var-file ./env/dev.tfvars
 terraform plan -var-file ./env/prod.tfvars
-terraform plan -var-file ./env/dev.tfvars -var "instance_count=9"
+terraform plan -var-file ./env/dev.tfvars -var "application_name=myapp"
 ```
 
 ---
@@ -219,15 +231,21 @@ variable "api_key" {
 Pass sensitive values via environment variable — never store in `.tfvars`:
 
 ```powershell
+# PowerShell
 $env:TF_VAR_api_key = "mysecret"
 terraform apply -var-file ./env/dev.tfvars
+```
+
+```bash
+# Bash
+export TF_VAR_api_key=mysecret
 ```
 
 ---
 
 ## 5. Validation
 
-Validation blocks run **before** Terraform contacts any provider:
+Validation blocks run **before** Terraform contacts any provider — catches bad input early:
 
 ```hcl
 variable "application_name" {
@@ -239,6 +257,19 @@ variable "application_name" {
 }
 ```
 
+Multiple conditions in one block:
+```hcl
+variable "instance_count" {
+  type = number
+  validation {
+    condition     = var.instance_count >= 5 &&
+                    var.instance_count <= 9 &&
+                    var.instance_count % 2 != 0
+    error_message = "Must be between 5 and 9 and never even!"
+  }
+}
+```
+
 ---
 
 ## 6. Loops — count, for_each, conditional
@@ -246,21 +277,24 @@ variable "application_name" {
 ### `count` — repeat N times
 ```hcl
 resource "random_string" "list" {
-  count   = length(var.regions)
+  count   = length(var.regions)   # creates one resource per region
   length  = 6
   upper   = false
   special = false
 }
+# access: random_string.list[0].result
 ```
 
-### `for_each` — iterate a map or set
+### `for_each` — iterate a map or set (preferred over count)
 ```hcl
 resource "random_string" "map" {
-  for_each = var.region_instance_count
+  for_each = var.region_instance_count   # { westus=4, eastus=8 }
   length   = 6
   upper    = false
   special  = false
 }
+# access: random_string.map["westus"].result
+# inside body: each.key → "westus", each.value → 4
 ```
 
 ### Conditional — create 0 or 1 resource
@@ -280,6 +314,8 @@ resource "random_string" "if" {
 | Items have meaningful unique keys | `for_each` |
 | On/off toggle                     | `count`    |
 
+> **Prefer `for_each` over `count`** for maps/sets — removing an item from the middle of a list causes `count` to re-index and destroy/recreate everything after it.
+
 ---
 
 ## 7. Modules
@@ -287,7 +323,7 @@ resource "random_string" "if" {
 ### Registry modules (remote)
 ```hcl
 module "alpha" {
-  source  = "hashicorp/module/random"
+  source  = "hashicorp/module/random"   # <namespace>/<module>/<provider>
   version = "1.0.0"
 }
 ```
@@ -298,44 +334,239 @@ module "charlie" {
   source = "./modules/rando"
   length = 8
 }
+
+# Read module output
+module.charlie.random_string
 ```
+
+| Scenario                              | Create a module? |
+|---------------------------------------|-----------------|
+| Same resource pattern in 3+ places    | Yes             |
+| Environment-specific config only      | No — use tfvars |
+| Shared infra used by multiple teams   | Yes             |
+| Single resource, used once            | No              |
 
 ---
 
 ## 8. Outputs
+
+From [outputs,tf](../outputs,tf) in this repo:
 
 ```hcl
 output "application_name" {
   value = var.application_name
 }
 
-output "primary_region" {
-  value = var.regions[0]
+output "environment_name" {
+  value = var.environment_name
 }
 ```
 
+Outputs that reference sensitive variables must be marked sensitive:
+```hcl
+output "api_key" {
+  value     = var.api_key
+  sensitive = true
+}
+```
+
+Read after apply:
 ```powershell
 terraform output application_name
+terraform output environment_name
+terraform output -json   # all outputs as JSON
 ```
 
 ---
 
-## 9. Quick Command Reference
+## 9. Provider & Version Constraints
+
+Defined in [versions.tf](../versions.tf):
+
+```hcl
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.8.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6.3"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+  subscription_id = "d835f9fb-e4f6-4ffe-9740-e32ebdef91ff"
+}
+```
+
+### Version constraint operators
+
+| Operator | Meaning | Example | Allows |
+|---|---|---|---|
+| `~>` | Pessimistic — patch/minor only | `~> 4.8.0` | `4.8.x` only |
+| `~>` (minor) | Pessimistic — minor only | `~> 4.8` | `4.x` where x ≥ 8 |
+| `>=` | Greater than or equal | `>= 4.0` | `4.0, 4.8, 5.0` |
+| `=` | Exact | `= 4.8.0` | `4.8.0` only |
+
+`~> 4.8.0` is the safest choice for production — allows bug fixes (`4.8.1`, `4.8.2`) but blocks breaking changes (`4.9.0`).
+
+### `.terraform.lock.hcl`
+
+`terraform init` creates this file automatically. It records the **exact provider versions and hashes** that were downloaded:
+
+```hcl
+provider "registry.terraform.io/hashicorp/azurerm" {
+  version     = "4.8.0"
+  constraints = "~> 4.8.0"
+  hashes = [...]
+}
+```
+
+**Always commit `.terraform.lock.hcl`** — it ensures every team member and CI/CD pipeline uses the exact same provider versions. Never commit the `.terraform/` directory itself (add to `.gitignore`).
+
+---
+
+## 10. Remote State & Backend
+
+Defined in [versions.tf](../versions.tf):
+
+```hcl
+backend "azurerm" {
+  resource_group_name  = "rg-sysint-terraform-state-dev-eastus"
+  storage_account_name = "st01terraformstate"
+  container_name       = "tfstate"
+  key                  = "terraform.tfstate-dev"
+}
+```
+
+### What is Terraform state?
+
+Terraform tracks every resource it creates in a **state file** (`terraform.tfstate`). It uses this to:
+- Know what exists vs what the config says should exist
+- Calculate the diff on every `plan`
+- Know what to destroy on `terraform destroy`
+
+### Why remote state?
+
+| | Local state | Remote state (Azure Blob) |
+|---|---|---|
+| Location | `terraform.tfstate` on disk | Azure Storage Account |
+| Team use | One person only | Multiple people/pipelines |
+| State locking | No | Yes — prevents concurrent applies |
+| Accidental deletion | Likely | Protected by Azure RBAC |
+| Secret exposure | File on disk | Controlled access |
+
+### How the backend works in this repo
+
+```
+terraform init
+    ↓
+Downloads providers → .terraform/
+Connects to Azure Blob Storage → reads/writes terraform.tfstate-dev
+    ↓
+terraform plan  → reads state, calculates diff
+terraform apply → applies changes, writes updated state back to blob
+```
+
+### State locking
+
+When `terraform apply` runs, Azure Blob Storage automatically locks the state file. If another pipeline tries to run at the same time it will wait or fail — preventing two applies from corrupting the state simultaneously.
+
+### Never commit state files
+
+State files contain resource IDs and may contain sensitive values. They are excluded by `.gitignore`:
+```
+*.tfstate
+*.tfstate.*
+```
+
+---
+
+## 11. Implicit Dependencies
+
+Terraform automatically determines the order to create resources based on **references between them**. You don't need to specify order manually.
+
+From [main.tf](../main.tf):
+
+```hcl
+resource "random_string" "suffix1" {
+  length  = 10
+  upper   = false
+  special = false
+}
+
+resource "azurerm_resource_group" "main" {
+  name     = "rg-${var.application_name}-${var.environment_name}"
+  location = var.primary_location
+}
+```
+
+If the resource group name referenced `random_string.suffix1.result`, Terraform would automatically create `random_string.suffix1` first — the reference creates an implicit dependency.
+
+### Explicit dependency with `depends_on`
+
+Use `depends_on` only when a dependency exists that Terraform cannot see through a reference:
+
+```hcl
+resource "azurerm_resource_group" "main" {
+  name     = "rg-${var.application_name}-${var.environment_name}"
+  location = var.primary_location
+
+  depends_on = [random_string.suffix1]   # explicit when no reference exists
+}
+```
+
+> Prefer implicit dependencies (references) over `depends_on` — they are self-documenting and Terraform can plan them more efficiently.
+
+---
+
+## 12. Quick Command Reference
 
 ```powershell
-terraform init
-terraform plan -var-file ./env/dev.tfvars
+# Setup
+terraform init                              # download providers, configure backend
+
+# Code quality
+terraform fmt                               # auto-format all .tf files
+terraform validate                          # validate config syntax before plan
+
+# Planning
+terraform plan                              # preview changes (dry run)
+terraform plan -var-file ./env/dev.tfvars   # plan with env-specific vars
+terraform plan -out=tfplan                  # save plan to file
+
+# Applying
 terraform apply -var-file ./env/dev.tfvars
 terraform apply -var-file ./env/prod.tfvars
-terraform output application_name
-terraform destroy
+terraform apply tfplan                      # apply a saved plan file
 
-# Key concepts
-variables.tf      → DECLARE variables
+# Inspecting
+terraform output                            # show all outputs
+terraform output application_name          # show specific output
+terraform output -json                      # all outputs as JSON
+terraform show                              # show current state in readable form
+terraform state list                        # list all resources tracked in state
+
+# Cleanup
+terraform destroy -var-file ./env/dev.tfvars
+```
+
+### File roles at a glance
+
+```
+versions.tf       → DECLARE providers, versions, backend
+variables.tf      → DECLARE variables (name, type, validation)
+main.tf           → DEFINE resources
+outputs,tf        → EXPOSE values after apply
 terraform.tfvars  → SET values (auto-loaded)
-env/*.tfvars      → SET environment-specific values (-var-file)
-TF_VAR_*          → SET via shell (highest priority, secrets)
-locals {}         → COMPUTE intermediate values
-outputs.tf        → EXPOSE values after apply
-modules/          → PACKAGE reusable resource groups
+env/*.tfvars      → SET environment-specific values (manual -var-file)
+TF_VAR_*          → SET via shell env (highest priority, use for secrets)
+locals {}         → COMPUTE intermediate values (not settable from outside)
+.terraform.lock.hcl → LOCK provider versions — always commit this
+.terraform/       → downloaded providers — never commit, add to .gitignore
+*.tfstate         → state files — never commit, add to .gitignore
 ```
