@@ -1,6 +1,11 @@
-# GitHub Actions + Azure OIDC Setup Guide
+# GitHub Actions + Azure UAMI OIDC Setup Guide
 
-Terraform CI/CD using GitHub Actions with Azure User-Assigned Managed Identity (UAMI) and OIDC federated credentials — no client secrets required.
+Terraform CI/CD using GitHub Actions authenticated to Azure via **User-Assigned Managed Identity (UAMI) with OIDC federated credentials**.
+
+- No App Registration
+- No Service Principal
+- No client secrets
+- No secret rotation
 
 ---
 
@@ -165,14 +170,15 @@ Copy `.github/workflows/terraform-nonprod.yml` and `.github/workflows/terraform-
 
 ## Key Concepts
 
-### Why UAMI over App Registration + SP?
+### What is UAMI OIDC?
 
-| | App Registration + SP | UAMI |
-|---|---|---|
-| App Registration needed | Yes | No |
-| Azure resource | No (Entra ID only) | Yes (lives in resource group) |
-| Reusable across repos | Yes (add more fed creds) | Yes (add more fed creds) |
-| Token lifetime | 1 hour | 24 hours |
+A **User-Assigned Managed Identity** is a standalone Azure resource (lives in a resource group) that represents an identity — similar to a service account. Instead of using passwords or certificates, we attach a **federated credential** to it that trusts OIDC tokens issued by GitHub Actions.
+
+When a workflow runs:
+1. GitHub issues a short-lived signed JWT (OIDC token) for that specific run
+2. Azure validates the token against the federated credential (issuer, subject, audience must all match)
+3. Azure grants access based on RBAC roles assigned to the UAMI
+4. No secret is stored anywhere
 
 ### Why two federated credentials per repo?
 
